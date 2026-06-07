@@ -5,6 +5,21 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import numpy as np
 
+mat = scipy.io.loadmat('studentDataLarge.mat')
+
+InputData = mat['inputLarge']
+OutputData = mat['outputLarge']
+
+GLOBAL_SEED = 42
+np.random.seed(GLOBAL_SEED)
+
+c_value = 4
+m_value = 2 
+max_iterations = 40
+
+tau = 0.95
+
+
 #%% FCM classification
 
 def FCM(X, c, m=2, max_iter=100):
@@ -68,6 +83,20 @@ def xie_beni_index(J, centers, N):
     return J / denominator
 
 
+def SIL(X,U):
+    X_labels = np.argmax(U)
+    N = X.shape[0]
+    s = np.zeros(N,1)
+    a = np.zeros(N,1)
+
+    for sample in range(N):
+        
+        a = np.mean()
+    
+    
+
+
+
 def predict_FCM(X, centers, m=2):
     distances = np.linalg.norm(X[:, np.newaxis] - centers, axis=2)
     distances = np.maximum(distances, 1e-10)  
@@ -83,9 +112,9 @@ def predict_FCM(X, centers, m=2):
             U[cluster, sample] = 1 / denom
     return U
 
-#%% PCA + LS
+#%% PCA,  LS
 
-def PCA_LS(X, y, tau = 0.95):
+def PCA_LS(X, y, tau):
     # Center the data
     X_train_mean =  np.mean(X, axis=0)
     X_centered = X - X_train_mean
@@ -143,22 +172,22 @@ def predict_LS(X, theta):
     return predictions
 
 
+def RMSE_mean_calculation(y_hat,y_mean_for_samples):
+    return np.sqrt(np.mean((y_hat - y_mean_for_samples)**2))
+
+
+
 
 
 #%% ==================================================
 # Method with random sorting for train/test split
 # ==================================================
 
-mat = scipy.io.loadmat('studentDataLarge.mat')
-
-InputData = mat['inputLarge']
-OutputData = mat['outputLarge']
-
 X_train, X_test, y_train, y_test = train_test_split(
     InputData, 
     OutputData, 
     test_size=0.30, 
-    random_state=42,  # Crucial to keep the shuffling synced
+    random_state=GLOBAL_SEED,  
     shuffle=True
 )
 
@@ -197,9 +226,6 @@ plt.show()
 
 print("\nRunning FCM clustering, Random Split...\n")
 
-c_value = 4
-m_value = 2 
-max_iterations = 40
 
 PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
@@ -253,7 +279,7 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
-tau = 0.95
+
 
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
@@ -276,7 +302,7 @@ for sample in range(X_train.shape[0]):
                             W_class[classSelection])
 
 
-#%% Evaluate the training model for the selected class
+#% Evaluate the training model for the selected class
 print("\n")
 
 print("================================")
@@ -284,6 +310,20 @@ print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
 
+
+# RMSE_mean
+# Dictionary to store mean y for each cluster
+y_mean_per_cluster = {}
+
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
+#%%
 #Evaluating on the test set
 
 # matlab notation is {2,6} in python it is {1,5}
@@ -313,6 +353,10 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 #%% ================================================================
 # Model B – no clustering (single global model)
 # ==================================================================
@@ -328,13 +372,27 @@ y_train_hat_global = predict_PSA_LS(X_train, theta_global, X_train_mean_global, 
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 
+y_mean_per_cluster = {}
+
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_PSA_LS(X_test, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
 
 print("\n=================================================================")
-print("Model B: No clustering, single global PCA (with) + LS model, Random Split")
+print("Model B: No clustering, single global PCA (without) + LS model, Random Split")
 print("=================================================================")
 
 
@@ -344,9 +402,21 @@ y_train_hat_global = predict_LS(X_train, theta_global)
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with LS - Training RMSE:", rmse_global_train)
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_LS(X_test, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with LS - Test RMSE:", rmse_global_test)
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 
 #%% ================================================================
@@ -364,9 +434,6 @@ x_min_train = X.min(axis=0)
 x_max_train = X.max(axis=0)
 XNormalized = (X - x_min_train) / (x_max_train - x_min_train)
 
-c_value = 4
-m_value = 2 
-max_iterations = 40
 
 PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
@@ -422,7 +489,6 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
-tau = 0.95
 
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
@@ -448,6 +514,14 @@ print("================================")
 print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
+
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 #Evaluating on the test set
 
@@ -478,6 +552,10 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 
 
 
@@ -499,18 +577,12 @@ print("\n\n================================================================")
 print("80/20 Split between train and test set, no shuffling (sequential split)")
 print("================================================================")
 
-mat = scipy.io.loadmat('studentDataLarge.mat')
-
-InputData = mat['inputLarge']
-OutputData = mat['outputLarge']
-
 X_train, X_test, y_train, y_test = train_test_split(
     InputData, 
     OutputData, 
     test_size=0.20, 
     shuffle=False
 )
-
 
 # ==================================================================
 # Model A: Using only parameters 2 and 6 for clustering and PCA + LS
@@ -545,10 +617,6 @@ plt.show()
 
 
 print("\nRunning FCM clustering, 80/20 Split...\n")
-
-c_value = 4
-m_value = 2 
-max_iterations = 40
 
 PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
@@ -602,7 +670,7 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
-tau = 0.95
+
 
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
@@ -633,6 +701,14 @@ print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 #Evaluating on the test set
 
 # matlab notation is {2,6} in python it is {1,5}
@@ -662,6 +738,10 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 #%% ================================================================
 # Model B – no clustering (single global model)
 # ==================================================================
@@ -677,9 +757,21 @@ y_train_hat_global = predict_PSA_LS(X_train, theta_global, X_train_mean_global, 
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_PSA_LS(X_test, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 
 print("\n================================")
@@ -692,9 +784,21 @@ y_train_hat_global = predict_LS(X_train, theta_global)
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with LS - Training RMSE:", rmse_global_train)
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_LS(X_test, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with LS - Test RMSE:", rmse_global_test)
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 
 #%% ================================================================
@@ -711,10 +815,6 @@ X = X_train
 x_min_train = X.min(axis=0)
 x_max_train = X.max(axis=0)
 XNormalized = (X - x_min_train) / (x_max_train - x_min_train)
-
-c_value = 4
-m_value = 2 
-max_iterations = 40
 
 PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
@@ -757,7 +857,7 @@ unique_new, counts_new = np.unique(X_train_labels, return_counts=True)
 for val, count in zip(unique_new, counts_new):
     print(f"Value {val}: {count} times")
 
-    
+
 plot = plt.scatter(XNormalized[:,1], XNormalized[:,5], c=np.argmax(U, axis=0))
 plt.scatter(centers[:,1], centers[:,5], c='red', marker='X', label='Cluster Centers')
 plt.xlabel('Normalized Paramether 6')
@@ -771,8 +871,9 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
-tau = 0.95
 
+
+print("\n")
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
     X_train_class = X_train[X_train_labels == i]
@@ -797,6 +898,13 @@ print("\n ================================")
 print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 #Evaluating on the test set
 
@@ -827,4 +935,7 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
