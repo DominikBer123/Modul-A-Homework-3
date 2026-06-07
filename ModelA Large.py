@@ -32,6 +32,7 @@ def FCM(X, c, m=2, max_iter=100):
 
     PC = []
     XB = []
+    SIL = []
     
     for iteration in range(max_iter):
         distances = np.linalg.norm(X[:, np.newaxis] - centers, axis=2)
@@ -60,9 +61,10 @@ def FCM(X, c, m=2, max_iter=100):
 
         PC.append(partition_coefficient(N, U))
         XB.append(xie_beni_index(J, centers, N))
+        SIL.append(SIL_calculation(X,U))
         
     
-    return PC, XB, U, centers, J_history
+    return PC, XB,SIL, U, centers, J_history
 
 
 # Partition coefficient (PC)
@@ -83,15 +85,63 @@ def xie_beni_index(J, centers, N):
     return J / denominator
 
 
-def SIL(X,U):
-    X_labels = np.argmax(U)
+def SIL_calculation(X, U):
+    # Hard assignment: assuming U has shape (num_clusters, N)
+    X_labels = np.argmax(U, axis=0) 
+    unique_clusters = np.unique(X_labels)
+    
     N = X.shape[0]
-    s = np.zeros(N,1)
-    a = np.zeros(N,1)
+    a = np.zeros(N)
+    b = np.zeros(N)
 
     for sample in range(N):
+        current_cluster = X_labels[sample]
         
-        a = np.mean()
+        # --- Calculate a_k (Same Cluster) ---
+        a_mask = (X_labels == current_cluster)
+        a_mask[sample] = False  # Exclude the sample itself
+        
+        a_points = X[a_mask]
+        a_distances = np.linalg.norm(X[sample] - a_points, axis=1)
+        a[sample] = np.nan_to_num(np.mean(a_distances))
+        
+        # --- Calculate b_k (Nearest Other Cluster) ---
+        mean_distances_to_other_clusters = []
+        
+        for other_cluster in unique_clusters:
+            if other_cluster == current_cluster:
+                continue  # Skip its own cluster
+            
+            # Mask for the neighboring cluster
+            b_mask = (X_labels == other_cluster)
+            b_points = X[b_mask]
+            
+            # Calculate mean distance to this specific other cluster
+            b_distances = np.linalg.norm(X[sample] - b_points, axis=1)
+            mean_distances_to_other_clusters.append(np.mean(b_distances))
+        
+        # b_k is the minimum of the mean distances to the other clusters
+        # If there are no other clusters, b[sample] defaults to 0
+        if mean_distances_to_other_clusters:
+            b[sample] = np.min(mean_distances_to_other_clusters)
+        else:
+            b[sample] = 0
+
+    # --- Calculate Final Silhouette Coefficient (SIL) ---
+    # Formula: s_k = (b_k - a_k) / max(a_k, b_k)
+    # Using np.maximum to element-wise find max(a_k, b_k)
+    max_ab = np.maximum(a, b)
+    
+    # Avoid division by zero if max_ab is 0
+    s = np.zeros(N)
+    valid_denom = max_ab > 0
+    s[valid_denom] = (b[valid_denom] - a[valid_denom]) / max_ab[valid_denom]
+    
+    # Global mean SIL score
+    sil_score = np.mean(s)
+    
+    return sil_score
+
     
     
 
@@ -227,32 +277,47 @@ plt.show()
 print("\nRunning FCM clustering, Random Split...\n")
 
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB,SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, Random Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, Random Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, Random Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 plot = plt.scatter(XNormalized[:,0], XNormalized[:,1], c=np.argmax(U, axis=0))
@@ -435,32 +500,46 @@ x_max_train = X.max(axis=0)
 XNormalized = (X - x_min_train) / (x_max_train - x_min_train)
 
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB, SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
-print("")
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, Random Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, Random Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, Random Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 X_train_labels_old = X_train_labels
@@ -618,32 +697,47 @@ plt.show()
 
 print("\nRunning FCM clustering, 80/20 Split...\n")
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB,SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, 80/20 Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 plot = plt.scatter(XNormalized[:,0], XNormalized[:,1], c=np.argmax(U, axis=0))
@@ -816,31 +910,46 @@ x_min_train = X.min(axis=0)
 x_max_train = X.max(axis=0)
 XNormalized = (X - x_min_train) / (x_max_train - x_min_train)
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB,SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, 80/20 Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 X_train_labels_old = X_train_labels

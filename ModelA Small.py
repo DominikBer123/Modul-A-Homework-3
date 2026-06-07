@@ -5,6 +5,21 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import numpy as np
 
+mat = scipy.io.loadmat('studentData.mat')
+
+InputData = mat['input']
+OutputData = mat['output']
+
+GLOBAL_SEED = 42
+np.random.seed(GLOBAL_SEED)
+
+c_value = 4
+m_value = 2 
+max_iterations = 40
+
+tau = 0.95
+
+
 #%% FCM classification
 
 def FCM(X, c, m=2, max_iter=100):
@@ -17,6 +32,7 @@ def FCM(X, c, m=2, max_iter=100):
 
     PC = []
     XB = []
+    SIL = []
     
     for iteration in range(max_iter):
         distances = np.linalg.norm(X[:, np.newaxis] - centers, axis=2)
@@ -45,9 +61,10 @@ def FCM(X, c, m=2, max_iter=100):
 
         PC.append(partition_coefficient(N, U))
         XB.append(xie_beni_index(J, centers, N))
+        SIL.append(SIL_calculation(X,U))
         
     
-    return PC, XB, U, centers, J_history
+    return PC, XB,SIL, U, centers, J_history
 
 
 # Partition coefficient (PC)
@@ -68,6 +85,68 @@ def xie_beni_index(J, centers, N):
     return J / denominator
 
 
+def SIL_calculation(X, U):
+    # Hard assignment: assuming U has shape (num_clusters, N)
+    X_labels = np.argmax(U, axis=0) 
+    unique_clusters = np.unique(X_labels)
+    
+    N = X.shape[0]
+    a = np.zeros(N)
+    b = np.zeros(N)
+
+    for sample in range(N):
+        current_cluster = X_labels[sample]
+        
+        # --- Calculate a_k (Same Cluster) ---
+        a_mask = (X_labels == current_cluster)
+        a_mask[sample] = False  # Exclude the sample itself
+        
+        a_points = X[a_mask]
+        a_distances = np.linalg.norm(X[sample] - a_points, axis=1)
+        a[sample] = np.nan_to_num(np.mean(a_distances))
+        
+        # --- Calculate b_k (Nearest Other Cluster) ---
+        mean_distances_to_other_clusters = []
+        
+        for other_cluster in unique_clusters:
+            if other_cluster == current_cluster:
+                continue  # Skip its own cluster
+            
+            # Mask for the neighboring cluster
+            b_mask = (X_labels == other_cluster)
+            b_points = X[b_mask]
+            
+            # Calculate mean distance to this specific other cluster
+            b_distances = np.linalg.norm(X[sample] - b_points, axis=1)
+            mean_distances_to_other_clusters.append(np.mean(b_distances))
+        
+        # b_k is the minimum of the mean distances to the other clusters
+        # If there are no other clusters, b[sample] defaults to 0
+        if mean_distances_to_other_clusters:
+            b[sample] = np.min(mean_distances_to_other_clusters)
+        else:
+            b[sample] = 0
+
+    # --- Calculate Final Silhouette Coefficient (SIL) ---
+    # Formula: s_k = (b_k - a_k) / max(a_k, b_k)
+    # Using np.maximum to element-wise find max(a_k, b_k)
+    max_ab = np.maximum(a, b)
+    
+    # Avoid division by zero if max_ab is 0
+    s = np.zeros(N)
+    valid_denom = max_ab > 0
+    s[valid_denom] = (b[valid_denom] - a[valid_denom]) / max_ab[valid_denom]
+    
+    # Global mean SIL score
+    sil_score = np.mean(s)
+    
+    return sil_score
+
+    
+    
+
+
+
 def predict_FCM(X, centers, m=2):
     distances = np.linalg.norm(X[:, np.newaxis] - centers, axis=2)
     distances = np.maximum(distances, 1e-10)  
@@ -83,9 +162,9 @@ def predict_FCM(X, centers, m=2):
             U[cluster, sample] = 1 / denom
     return U
 
-#%% PCA + LS
+#%% PCA,  LS
 
-def PCA_LS(X, y, tau = 0.95):
+def PCA_LS(X, y, tau):
     # Center the data
     X_train_mean =  np.mean(X, axis=0)
     X_centered = X - X_train_mean
@@ -143,29 +222,24 @@ def predict_LS(X, theta):
     return predictions
 
 
+def RMSE_mean_calculation(y_hat,y_mean_for_samples):
+    return np.sqrt(np.mean((y_hat - y_mean_for_samples)**2))
+
+
+
 
 
 #%% ==================================================
 # Method with random sorting for train/test split
 # ==================================================
 
-mat = scipy.io.loadmat('studentData.mat')
-
-InputData = mat['input']
-OutputData = mat['output']
-
 X_train, X_test, y_train, y_test = train_test_split(
     InputData, 
     OutputData, 
     test_size=0.30, 
-    random_state=42,  # Crucial to keep the shuffling synced
+    random_state=GLOBAL_SEED,  
     shuffle=True
 )
-
-c_value = 4
-m_value = 2 
-max_iterations = 40
-tau = 0.95
 
 
 # ==================================================================
@@ -203,32 +277,47 @@ plt.show()
 print("\nRunning FCM clustering, Random Split...\n")
 
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB,SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, Random Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, Random Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, Random Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 plot = plt.scatter(XNormalized[:,0], XNormalized[:,1], c=np.argmax(U, axis=0))
@@ -255,6 +344,8 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
+
+
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
     X_train_class = X_train[X_train_labels == i]
@@ -276,7 +367,7 @@ for sample in range(X_train.shape[0]):
                             W_class[classSelection])
 
 
-#%% Evaluate the training model for the selected class
+#% Evaluate the training model for the selected class
 print("\n")
 
 print("================================")
@@ -284,6 +375,20 @@ print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
 
+
+# RMSE_mean
+# Dictionary to store mean y for each cluster
+y_mean_per_cluster = {}
+
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
+#%%
 #Evaluating on the test set
 
 # matlab notation is {2,6} in python it is {1,5}
@@ -313,6 +418,10 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 #%% ================================================================
 # Model B – no clustering (single global model)
 # ==================================================================
@@ -328,13 +437,27 @@ y_train_hat_global = predict_PSA_LS(X_train, theta_global, X_train_mean_global, 
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 
+y_mean_per_cluster = {}
+
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_PSA_LS(X_test, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
 
 print("\n=================================================================")
-print("Model B: No clustering, single global PCA (with) + LS model, Random Split")
+print("Model B: No clustering, single global PCA (without) + LS model, Random Split")
 print("=================================================================")
 
 
@@ -344,9 +467,21 @@ y_train_hat_global = predict_LS(X_train, theta_global)
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with LS - Training RMSE:", rmse_global_train)
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_LS(X_test, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with LS - Test RMSE:", rmse_global_test)
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 
 #%% ================================================================
@@ -364,32 +499,47 @@ x_min_train = X.min(axis=0)
 x_max_train = X.max(axis=0)
 XNormalized = (X - x_min_train) / (x_max_train - x_min_train)
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+
+PC, XB, SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
-print("")
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, Random Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, Random Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, Random Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 X_train_labels_old = X_train_labels
@@ -405,7 +555,6 @@ print("\n=== X_train_labels ===")
 unique_new, counts_new = np.unique(X_train_labels, return_counts=True)
 for val, count in zip(unique_new, counts_new):
     print(f"Value {val}: {count} times")
-
 plot = plt.scatter(XNormalized[:,1], XNormalized[:,5], c=np.argmax(U, axis=0))
 plt.scatter(centers[:,1], centers[:,5], c='red', marker='X', label='Cluster Centers')
 plt.xlabel('Normalized Paramether 6')
@@ -419,7 +568,6 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
-tau = 0.95
 
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
@@ -445,6 +593,14 @@ print("================================")
 print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
+
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 #Evaluating on the test set
 
@@ -475,6 +631,10 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 
 
 
@@ -496,24 +656,12 @@ print("\n\n================================================================")
 print("80/20 Split between train and test set, no shuffling (sequential split)")
 print("================================================================")
 
-mat = scipy.io.loadmat('studentData.mat')
-
-InputData = mat['input']
-OutputData = mat['output']
-
 X_train, X_test, y_train, y_test = train_test_split(
     InputData, 
     OutputData, 
     test_size=0.20, 
     shuffle=False
 )
-
-c_value = 4
-m_value = 2 
-max_iterations = 40
-
-tau = 0.95
-
 
 # ==================================================================
 # Model A: Using only parameters 2 and 6 for clustering and PCA + LS
@@ -549,32 +697,47 @@ plt.show()
 
 print("\nRunning FCM clustering, 80/20 Split...\n")
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB,SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, 80/20 Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 plot = plt.scatter(XNormalized[:,0], XNormalized[:,1], c=np.argmax(U, axis=0))
@@ -600,6 +763,8 @@ X_train_labels=np.argmax(U, axis=0)
 theats = {}
 X_mean_Class = {}
 W_class = {}
+
+
 
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
@@ -630,6 +795,14 @@ print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 #Evaluating on the test set
 
 # matlab notation is {2,6} in python it is {1,5}
@@ -659,6 +832,10 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 #%% ================================================================
 # Model B – no clustering (single global model)
 # ==================================================================
@@ -674,9 +851,21 @@ y_train_hat_global = predict_PSA_LS(X_train, theta_global, X_train_mean_global, 
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_PSA_LS(X_test, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 
 print("\n================================")
@@ -689,9 +878,21 @@ y_train_hat_global = predict_LS(X_train, theta_global)
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with LS - Training RMSE:", rmse_global_train)
 
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
+
 y_test_hat_global = predict_LS(X_test, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with LS - Test RMSE:", rmse_global_test)
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 
 #%% ================================================================
@@ -709,31 +910,46 @@ x_min_train = X.min(axis=0)
 x_max_train = X.max(axis=0)
 XNormalized = (X - x_min_train) / (x_max_train - x_min_train)
 
-PC, XB, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
+PC, XB,SIL, U, centers, J_history = FCM(XNormalized, c = c_value, m = m_value, max_iter = max_iterations)
 
 print("Partition Coefficient (PC):", PC[-1])
 print("Xie-Beni Index (XB):", XB[-1])
+print("Mean silhouette coefficien (SLI):", SIL[-1])
 
-plot = plt.plot(PC)
-plt.xlabel('Iteration')
-plt.ylabel('Partition Coefficient (PC)')
-plt.title('FCM Partition Coefficient Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
-plot = plt.plot(XB)
-plt.xlabel('Iteration')
-plt.ylabel('Xie-Beni Index (XB)')
-plt.title('FCM Xie-Beni Index Convergence, 80/20 Split')
-plt.grid(True)
-plt.show()
+# Top-Left: Partition Coefficient (PC)
+axs[0, 0].plot(PC)
+axs[0, 0].set_xlabel('Iteration')
+axs[0, 0].set_ylabel('Partition Coefficient (PC)')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].grid(True)
 
+# Top-Right: Xie-Beni Index (XB)
+axs[0, 1].plot(XB)
+axs[0, 1].set_xlabel('Iteration')
+axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].grid(True)
 
-plt.plot(J_history)
-plt.xlabel('Iteration')
-plt.ylabel('Objective Function J')
-plt.title('FCM Objective Function Convergence, 80/20 Split')
-plt.grid(True)
+# Bottom-Left: Mean Silhouette Coefficient (SIL)
+axs[1, 0].plot(SIL)
+axs[1, 0].set_xlabel('Iteration')
+axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].grid(True)
+
+# Bottom-Right: Objective Function J (J_history)
+axs[1, 1].plot(J_history)
+axs[1, 1].set_xlabel('Iteration')
+axs[1, 1].set_ylabel('Objective Function J')
+axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].grid(True)
+
+# Automatically adjust spacing between subplots to prevent overlapping
+plt.tight_layout()
+
+# Display the combined plot
 plt.show()
 
 X_train_labels_old = X_train_labels
@@ -749,6 +965,8 @@ print("\n=== X_train_labels ===")
 unique_new, counts_new = np.unique(X_train_labels, return_counts=True)
 for val, count in zip(unique_new, counts_new):
     print(f"Value {val}: {count} times")
+
+
 plot = plt.scatter(XNormalized[:,1], XNormalized[:,5], c=np.argmax(U, axis=0))
 plt.scatter(centers[:,1], centers[:,5], c='red', marker='X', label='Cluster Centers')
 plt.xlabel('Normalized Paramether 6')
@@ -762,6 +980,9 @@ theats = {}
 X_mean_Class = {}
 W_class = {}
 
+
+
+print("\n")
 for i in range(c_value):
     print(f"Training PCA + LS for Class {i}...")
     X_train_class = X_train[X_train_labels == i]
@@ -786,6 +1007,13 @@ print("\n ================================")
 print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
+for cluster in range(c_value):
+    cluster_indices = np.where(X_train_labels == cluster)[0]
+    y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
+
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 #Evaluating on the test set
 
@@ -816,4 +1044,7 @@ print("Test: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+print(f"RMSE_mean: {RMSE_mean:.4f}")
 
