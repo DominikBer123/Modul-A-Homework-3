@@ -218,7 +218,7 @@ def PCA_LS(X, y, tau):
     eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
     
     # Sort eigenvalues and eigenvectors in descending order
-    sorted_indices = np.argsort(eigenvalues)[::-1]  # Fixed: removed "dece"
+    sorted_indices = np.argsort(eigenvalues)[::-1]  
     sorted_eigenvectors = eigenvectors[:, sorted_indices]
     sorted_eigenvalues = eigenvalues[sorted_indices]  # Also sort eigenvalues
 
@@ -268,7 +268,33 @@ def predict_LS(X, theta):
     return predictions
 
 def RMSE_mean_calculation(y_hat,y_mean_for_samples):
-    return np.sqrt(np.mean((y_hat - y_mean_for_samples)**2))
+    return np.sqrt(np.mean((y_hat.ravel() - y_mean_for_samples)**2))
+
+def print_rmse_mean_per_class(y_hat, y_true, labels, c_value):
+    """
+    Calculate RMSE_mean per class (comparing predictions to cluster means)
+    """
+    # Flatten arrays
+    y_hat = y_hat.reshape(-1)
+    y_true = y_true.reshape(-1)
+    labels = labels.reshape(-1)
+    
+    print(f"\n{'Class':<8} {'Count':<8} {'RMSE_mean':<12}")
+    print(f"{'-'*30}")
+    
+    for cluster in range(c_value):
+        mask = labels == cluster
+        if np.sum(mask) > 0:
+            # Get predictions for this class
+            y_hat_class = y_hat[mask]
+            
+            # Calculate mean of true values for this class
+            y_mean_class = np.mean(y_true[mask])
+            
+            # Calculate RMSE between predictions and class mean
+            rmse_mean = np.sqrt(np.mean((y_hat_class - y_mean_class)**2))
+            
+            print(f"{cluster:<8} {np.sum(mask):<8} {rmse_mean:<12.6f}")
 
 #%% FCM clustering
 
@@ -402,8 +428,8 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train_norm)**2)))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_hat, y_train_norm, X_train_labels, c_value)
 
-#%%
 #Evaluating on the test set
 
 
@@ -411,7 +437,7 @@ U_Test = predict_FCM(X_test_norm[:,[1,5]], centers, m = m_value)
 X_test_labels=np.argmax(U_Test, axis=0)
 
 
-y_test_hat = np.zeros_like(y_test)
+y_test_hat = np.zeros_like(y_test_norm)
 for sample in range(X_test_norm.shape[0]):
     #print(f"Sample {sample}: Assigned Class {X_test_labels[sample]}")
 
@@ -430,6 +456,7 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test_norm)**2))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
 RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_test_hat, y_test_norm, X_test_labels, c_value)
 
 #%% ================================================================
 # Model B – no clustering (single global model)
@@ -457,14 +484,19 @@ print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_train_hat_global, y_train_norm, X_train_labels, c_value)
+
 
 y_test_hat_global = predict_PSA_LS(X_test_norm, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test_norm)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat_global,y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
+
+print_rmse_mean_per_class(y_test_hat_global, y_test_norm, X_test_labels, c_value)
 
 #%%
 print("\n=================================================================")
@@ -487,6 +519,7 @@ print("Global Model with LS - Training RMSE:", rmse_global_train)
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_train_hat_global, y_train_norm, X_train_labels, c_value)
 
 y_test_hat_global = predict_LS(X_test_norm, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test_norm)**2))
@@ -495,6 +528,7 @@ print("Global Model with LS - Test RMSE:", rmse_global_test)
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
 RMSE_mean = RMSE_mean_calculation(y_test_hat_global,y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_test_hat_global, y_test_norm, X_test_labels, c_value)
 
 
 #%% ================================================================
@@ -617,6 +651,7 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train_norm)**2)))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_hat, y_train_norm, X_train_labels, c_value)
 
 
 
@@ -624,7 +659,7 @@ U_Test = predict_FCM(X_test_norm, centers, m = m_value)
 X_test_labels=np.argmax(U_Test, axis=0)
 
 
-y_test_hat = np.zeros_like(y_test)
+y_test_hat = np.zeros_like(y_test_norm)
 for sample in range(X_test_norm.shape[0]):
     #print(f"Sample {sample}: Assigned Class {X_test_labels[sample]}")
 
@@ -643,6 +678,7 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test_norm)**2))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
 RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_test_hat, y_test_norm, X_test_labels, c_value)
 
 
 # Create DataFrame with all features and cluster labels

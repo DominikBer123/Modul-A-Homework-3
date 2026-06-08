@@ -71,14 +71,14 @@ X_test_norm = (X_test - x_min_train) / (x_max_train - x_min_train)
 plot = plt.scatter(X_train[:,1], X_train[:,5])
 plt.xlabel('Paramether 6')
 plt.ylabel('Paramether 2')
-plt.title('Model A, Random Split: Paramether 6 vs Paramether 2')
+plt.title('Model A, Normal Split: Paramether 6 vs Paramether 2')
 plt.grid(True)
 plt.show()
 
 plot = plt.scatter(X_train_norm[:,1], X_train_norm[:,5])
 plt.xlabel('Normalized Paramether 6')
 plt.ylabel('Normalized Paramether 2')
-plt.title('Model A, Random Split: Normalized Paramether 6 vs Normalized Paramether 2')
+plt.title('Model A, Normal Split: Normalized Paramether 6 vs Normalized Paramether 2')
 plt.grid(True)
 plt.show()
 
@@ -219,7 +219,7 @@ def PCA_LS(X, y, tau):
     eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
     
     # Sort eigenvalues and eigenvectors in descending order
-    sorted_indices = np.argsort(eigenvalues)[::-1]  # Fixed: removed "dece"
+    sorted_indices = np.argsort(eigenvalues)[::-1]  
     sorted_eigenvectors = eigenvectors[:, sorted_indices]
     sorted_eigenvalues = eigenvalues[sorted_indices]  # Also sort eigenvalues
 
@@ -269,7 +269,33 @@ def predict_LS(X, theta):
     return predictions
 
 def RMSE_mean_calculation(y_hat,y_mean_for_samples):
-    return np.sqrt(np.mean((y_hat - y_mean_for_samples)**2))
+    return np.sqrt(np.mean((y_hat.ravel() - y_mean_for_samples)**2))
+
+def print_rmse_mean_per_class(y_hat, y_true, labels, c_value):
+    """
+    Calculate RMSE_mean per class (comparing predictions to cluster means)
+    """
+    # Flatten arrays
+    y_hat = y_hat.reshape(-1)
+    y_true = y_true.reshape(-1)
+    labels = labels.reshape(-1)
+    
+    print(f"\n{'Class':<8} {'Count':<8} {'RMSE_mean':<12}")
+    print(f"{'-'*30}")
+    
+    for cluster in range(c_value):
+        mask = labels == cluster
+        if np.sum(mask) > 0:
+            # Get predictions for this class
+            y_hat_class = y_hat[mask]
+            
+            # Calculate mean of true values for this class
+            y_mean_class = np.mean(y_true[mask])
+            
+            # Calculate RMSE between predictions and class mean
+            rmse_mean = np.sqrt(np.mean((y_hat_class - y_mean_class)**2))
+            
+            print(f"{cluster:<8} {np.sum(mask):<8} {rmse_mean:<12.6f}")
 
 #%% FCM clustering
 
@@ -278,12 +304,12 @@ def RMSE_mean_calculation(y_hat,y_mean_for_samples):
 # ==================================================================
 
 print("================================")
-print("Model A: Using only parameters 2 and 6 for clustering and PCA + LS, Random Split")
+print("Model A: Using only parameters 2 and 6 for clustering and PCA + LS, Normal Split")
 print("================================")
 # matlab notation is {2,6} in python it is {1,5}
 X = X_train_norm[:, [1,5]]
 
-print("\nRunning FCM clustering, Random Split...\n")
+print("\nRunning FCM clustering, Normal Split...\n")
 
 
 PC, XB,SIL, U, centers, J_history = FCM(X=X, c = c_value, m = m_value, max_iter = max_iterations)
@@ -299,28 +325,28 @@ fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 axs[0, 0].plot(PC)
 axs[0, 0].set_xlabel('Iteration')
 axs[0, 0].set_ylabel('Partition Coefficient (PC)')
-axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Normal Split')
 axs[0, 0].grid(True)
 
 # Top-Right: Xie-Beni Index (XB)
 axs[0, 1].plot(XB)
 axs[0, 1].set_xlabel('Iteration')
 axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
-axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Normal Split')
 axs[0, 1].grid(True)
 
 # Bottom-Left: Mean Silhouette Coefficient (SIL)
 axs[1, 0].plot(SIL)
 axs[1, 0].set_xlabel('Iteration')
 axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
-axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Normal Split')
 axs[1, 0].grid(True)
 
 # Bottom-Right: Objective Function J (J_history)
 axs[1, 1].plot(J_history)
 axs[1, 1].set_xlabel('Iteration')
 axs[1, 1].set_ylabel('Objective Function J')
-axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].set_title('FCM Objective Function Convergence, Normal Split')
 axs[1, 1].grid(True)
 
 # Automatically adjust spacing between subplots to prevent overlapping
@@ -333,7 +359,7 @@ plot = plt.scatter(X[:,0], X[:,1], c=np.argmax(U, axis=0))
 plt.scatter(centers[:,0], centers[:,1], c='red', marker='X', label='Cluster Centers')
 plt.xlabel('Normalized Paramether 6')
 plt.ylabel('Normalized Paramether 2')   
-plt.title('Model A - FCM Clustering Results, Random Split')
+plt.title('Model A - FCM Clustering Results, Normal Split')
 plt.grid(True)
 plt.show()
 
@@ -403,8 +429,8 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train_norm)**2)))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_hat, y_train_norm, X_train_labels, c_value)
 
-#%%
 #Evaluating on the test set
 
 
@@ -412,7 +438,7 @@ U_Test = predict_FCM(X_test_norm[:,[1,5]], centers, m = m_value)
 X_test_labels=np.argmax(U_Test, axis=0)
 
 
-y_test_hat = np.zeros_like(y_test)
+y_test_hat = np.zeros_like(y_test_norm)
 for sample in range(X_test_norm.shape[0]):
     #print(f"Sample {sample}: Assigned Class {X_test_labels[sample]}")
 
@@ -431,6 +457,7 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test_norm)**2))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
 RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_test_hat, y_test_norm, X_test_labels, c_value)
 
 #%% ================================================================
 # Model B – no clustering (single global model)
@@ -438,7 +465,7 @@ print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 
 print("\n=================================================================")
-print("Model B: No clustering, single global PCA (with) + LS model, Random Split")
+print("Model B: No clustering, single global PCA (with) + LS model, Normal Split")
 print("=================================================================")
 
 y_mean_per_cluster = {}
@@ -458,18 +485,23 @@ print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_train_hat_global, y_train_norm, X_train_labels, c_value)
+
 
 y_test_hat_global = predict_PSA_LS(X_test_norm, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test_norm)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat_global,y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+
+
+print_rmse_mean_per_class(y_test_hat_global, y_test_norm, X_test_labels, c_value)
 
 #%%
 print("\n=================================================================")
-print("Model B: No clustering, single global PCA (without) + LS model, Random Split")
+print("Model B: No clustering, single global PCA (without) + LS model, Normal Split")
 print("=================================================================")
 
 y_mean_per_cluster = {}
@@ -488,6 +520,7 @@ print("Global Model with LS - Training RMSE:", rmse_global_train)
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_train_hat_global, y_train_norm, X_train_labels, c_value)
 
 y_test_hat_global = predict_LS(X_test_norm, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test_norm)**2))
@@ -496,6 +529,7 @@ print("Global Model with LS - Test RMSE:", rmse_global_test)
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
 RMSE_mean = RMSE_mean_calculation(y_test_hat_global,y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_test_hat_global, y_test_norm, X_test_labels, c_value)
 
 
 #%% ================================================================
@@ -503,10 +537,10 @@ print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 # ==================================================================
 
 print("\n=================================================================")
-print("Model C – GK on all p dimensions, Random Split")
+print("Model C – GK on all p dimensions, Normal Split")
 print("=================================================================")
 
-print("\nRunning FCM clustering, Random Split...\n")
+print("\nRunning FCM clustering, Normal Split...\n")
 
 PC, XB, SIL, U, centers, J_history = FCM(X_train_norm, c = c_value, m = m_value, max_iter = max_iterations)
 
@@ -520,28 +554,28 @@ fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 axs[0, 0].plot(PC)
 axs[0, 0].set_xlabel('Iteration')
 axs[0, 0].set_ylabel('Partition Coefficient (PC)')
-axs[0, 0].set_title('FCM Partition Coefficient Convergence, Random Split')
+axs[0, 0].set_title('FCM Partition Coefficient Convergence, Normal Split')
 axs[0, 0].grid(True)
 
 # Top-Right: Xie-Beni Index (XB)
 axs[0, 1].plot(XB)
 axs[0, 1].set_xlabel('Iteration')
 axs[0, 1].set_ylabel('Xie-Beni Index (XB)')
-axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Random Split')
+axs[0, 1].set_title('FCM Xie-Beni Index Convergence, Normal Split')
 axs[0, 1].grid(True)
 
 # Bottom-Left: Mean Silhouette Coefficient (SIL)
 axs[1, 0].plot(SIL)
 axs[1, 0].set_xlabel('Iteration')
 axs[1, 0].set_ylabel('Mean silhouette coefficient (SIL)')
-axs[1, 0].set_title('FCM Mean silhouette coefficient, Random Split')
+axs[1, 0].set_title('FCM Mean silhouette coefficient, Normal Split')
 axs[1, 0].grid(True)
 
 # Bottom-Right: Objective Function J (J_history)
 axs[1, 1].plot(J_history)
 axs[1, 1].set_xlabel('Iteration')
 axs[1, 1].set_ylabel('Objective Function J')
-axs[1, 1].set_title('FCM Objective Function Convergence, Random Split')
+axs[1, 1].set_title('FCM Objective Function Convergence, Normal Split')
 axs[1, 1].grid(True)
 
 # Automatically adjust spacing between subplots to prevent overlapping
@@ -566,11 +600,12 @@ for val, count in zip(unique_new, counts_new):
 
 print("")
 
+
 plot = plt.scatter(X_train_norm[:,1], X_train_norm[:,5], c=np.argmax(U, axis=0))
 plt.scatter(centers[:,1], centers[:,5], c='red', marker='X', label='Cluster Centers')
 plt.xlabel('Normalized Paramether 6')
 plt.ylabel('Normalized Paramether 2')   
-plt.title('Model C - FCM Clustering Results, Random Split')
+plt.title('Model C - FCM Clustering Results, Normal Split')
 plt.grid(True)
 plt.show()
 
@@ -617,6 +652,7 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train_norm)**2)))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
 RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_hat, y_train_norm, X_train_labels, c_value)
 
 
 
@@ -624,7 +660,7 @@ U_Test = predict_FCM(X_test_norm, centers, m = m_value)
 X_test_labels=np.argmax(U_Test, axis=0)
 
 
-y_test_hat = np.zeros_like(y_test)
+y_test_hat = np.zeros_like(y_test_norm)
 for sample in range(X_test_norm.shape[0]):
     #print(f"Sample {sample}: Assigned Class {X_test_labels[sample]}")
 
@@ -643,6 +679,7 @@ print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test_norm)**2))
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
 RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+print_rmse_mean_per_class(y_test_hat, y_test_norm, X_test_labels, c_value)
 
 
 # Create DataFrame with all features and cluster labels
