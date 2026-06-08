@@ -5,12 +5,15 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import numpy as np
 
+import seaborn as sns
+import pandas as pd
+
 mat = scipy.io.loadmat('studentDataLarge.mat')
 
 InputData = mat['inputLarge']
 OutputData = mat['outputLarge']
 
-GLOBAL_SEED = 42
+GLOBAL_SEED = 36544
 np.random.seed(GLOBAL_SEED)
 
 c_value = 4
@@ -24,47 +27,39 @@ tau = 0.95
 
 def FCM(X, c, m=2, max_iter=100):
     N, features = X.shape
-    centers = np.random.rand(c, features)
-    U = np.zeros((c, N))
+    # Standard normal or uniform initialization works for any features count
+    centers = np.random.rand(c, features) 
     J_history = []
-    centers_old = []
 
-
-    PC = []
-    XB = []
-    SIL = []
+    PC, XB, SIL = [], [], []
     
     for iteration in range(max_iter):
+        # 1. Compute distances (Works for any number of features via axis=2)
         distances = np.linalg.norm(X[:, np.newaxis] - centers, axis=2)
         distances = np.maximum(distances, 1e-10)  
         
-        # 2. Update membership matrix
-        for sample in range(N):
-            for cluster in range(c):
-                d = distances[sample, cluster]
-                denom = np.sum((d / distances[sample]) ** (2/(m-1)))
-                U[cluster, sample] = 1 / denom
+        # 2. VECTORIZED Membership Update (Fixes the speed bottleneck)
+        # distances[:, :, None] has shape (N, c, 1)
+        # distances[:, None, :] has shape (N, 1, c)
+        denom = np.sum((distances[:, :, np.newaxis] / distances[:, np.newaxis, :]) ** (2 / (m - 1)), axis=2)
+        U = 1.0 / denom.T
         
+        # 3. VECTORIZED Centers Update
+        um = U ** m
+        centers = np.dot(um, X) / np.sum(um, axis=1)[:, np.newaxis]
         
-        #centers_old.append(centers.copy())
-
-        # 3. Update centers
-        for cluster in range(c):
-            um = U[cluster] ** m
-            numerator = np.sum(um[:, np.newaxis] * X, axis=0)
-            denominator = np.sum(um)
-            centers[cluster] = numerator / denominator
-        
-        # 4. Calculate objective function
+        # 4. Objective Function
         J = np.sum((U**m) * (distances.T**2))
         J_history.append(J)
 
+        # Validation Indices
         PC.append(partition_coefficient(N, U))
         XB.append(xie_beni_index(J, centers, N))
-        SIL.append(SIL_calculation(X,U))
         
-    
-    return PC, XB,SIL, U, centers, J_history
+        # Highly recommended to move SIL out of this loop if N is large!
+        SIL.append(SIL_calculation(X, U)) 
+        
+    return PC, XB, SIL, U, centers, J_history
 
 
 # Partition coefficient (PC)
@@ -102,8 +97,13 @@ def SIL_calculation(X, U):
         a_mask[sample] = False  # Exclude the sample itself
         
         a_points = X[a_mask]
-        a_distances = np.linalg.norm(X[sample] - a_points, axis=1)
-        a[sample] = np.nan_to_num(np.mean(a_distances))
+        
+        # FIX: Check if there are other points in the same cluster
+        if len(a_points) > 0:
+            a_distances = np.linalg.norm(X[sample] - a_points, axis=1)
+            a[sample] = np.mean(a_distances)
+        else:
+            a[sample] = 0.0  # Lone point in cluster defaults to 0
         
         # --- Calculate b_k (Nearest Other Cluster) ---
         mean_distances_to_other_clusters = []
@@ -116,23 +116,20 @@ def SIL_calculation(X, U):
             b_mask = (X_labels == other_cluster)
             b_points = X[b_mask]
             
-            # Calculate mean distance to this specific other cluster
-            b_distances = np.linalg.norm(X[sample] - b_points, axis=1)
-            mean_distances_to_other_clusters.append(np.mean(b_distances))
+            # FIX: Only calculate if the other cluster actually has points
+            if len(b_points) > 0:
+                b_distances = np.linalg.norm(X[sample] - b_points, axis=1)
+                mean_distances_to_other_clusters.append(np.mean(b_distances))
         
         # b_k is the minimum of the mean distances to the other clusters
-        # If there are no other clusters, b[sample] defaults to 0
         if mean_distances_to_other_clusters:
             b[sample] = np.min(mean_distances_to_other_clusters)
         else:
-            b[sample] = 0
+            b[sample] = 0.0
 
     # --- Calculate Final Silhouette Coefficient (SIL) ---
-    # Formula: s_k = (b_k - a_k) / max(a_k, b_k)
-    # Using np.maximum to element-wise find max(a_k, b_k)
     max_ab = np.maximum(a, b)
     
-    # Avoid division by zero if max_ab is 0
     s = np.zeros(N)
     valid_denom = max_ab > 0
     s[valid_denom] = (b[valid_denom] - a[valid_denom]) / max_ab[valid_denom]
@@ -340,6 +337,16 @@ print("\n")
 X_train_labels=np.argmax(U, axis=0)
 
 
+# Create DataFrame with all features and cluster labels
+df = pd.DataFrame(X_train, columns=[f'Feature_{i+1}' for i in range(X_train.shape[1])])
+df['Cluster'] = X_train_labels
+
+# Pairplot - shows all 2D combinations
+sns.pairplot(df, hue='Cluster', diag_kind='hist', palette='Set1')
+plt.suptitle('Model A- [2,6] Feature ', y=1.02)
+plt.show()
+
+
 theats = {}
 X_mean_Class = {}
 W_class = {}
@@ -419,7 +426,7 @@ print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 #%% ================================================================
@@ -444,7 +451,7 @@ for cluster in range(c_value):
     y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 y_test_hat_global = predict_PSA_LS(X_test, theta_global, X_train_mean_global, W_global)
@@ -452,7 +459,7 @@ rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 
@@ -472,7 +479,7 @@ for cluster in range(c_value):
     y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 y_test_hat_global = predict_LS(X_test, theta_global)
@@ -480,7 +487,7 @@ rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with LS - Test RMSE:", rmse_global_test)
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat_global,y_mean_for_samples)
 print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 
@@ -493,6 +500,7 @@ print("Model C – GK on all p dimensions, Random Split")
 print("=================================================================")
 
 X = X_train
+
 
 # Normalization
 x_min_train = X.min(axis=0)
@@ -594,6 +602,7 @@ print("Training: Evaluating the model for the selected class with PCA + LS...")
 print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_hat - y_train)**2)))
 
+y_mean_per_cluster = np.zeros((c_value,1))
 for cluster in range(c_value):
     cluster_indices = np.where(X_train_labels == cluster)[0]
     y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
@@ -632,8 +641,18 @@ print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
+
+
+# Create DataFrame with all features and cluster labels
+df = pd.DataFrame(X_train, columns=[f'Feature_{i+1}' for i in range(X_train.shape[1])])
+df['Cluster'] = X_train_labels
+
+# Pairplot - shows all 2D combinations
+sns.pairplot(df, hue='Cluster', diag_kind='hist', palette='Set1')
+plt.suptitle('Model C - All Feature Pairs by Cluster', y=1.02)
+plt.show()
 
 
 
@@ -833,7 +852,7 @@ print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
 
 #%% ================================================================
@@ -841,9 +860,9 @@ print(f"RMSE_mean: {RMSE_mean:.4f}")
 # ==================================================================
 
 
-print("\n================================")
-print("Model B: No clustering, single global PCA (with) + LS model, 80/20 Split")
-print("================================")
+print("\n=================================================================")
+print("Model B: No clustering, single global PCA (with) + LS model, 80/20")
+print("=================================================================")
 
 theta_global, X_train_mean_global, W_global = PCA_LS(X_train, y_train, tau = tau)
 
@@ -851,26 +870,29 @@ y_train_hat_global = predict_PSA_LS(X_train, theta_global, X_train_mean_global, 
 rmse_global_train = np.sqrt(np.mean((y_train_hat_global - y_train)**2))
 print("Global Model with PCA + LS - Training RMSE:", rmse_global_train)
 
+y_mean_per_cluster = {}
+
 for cluster in range(c_value):
     cluster_indices = np.where(X_train_labels == cluster)[0]
     y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
-print(f"RMSE_mean: {RMSE_mean:.4f}")
+RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 y_test_hat_global = predict_PSA_LS(X_test, theta_global, X_train_mean_global, W_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with PCA + LS - Test RMSE:", rmse_global_test)
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
-print(f"RMSE_mean: {RMSE_mean:.4f}")
+RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 
-print("\n================================")
-print("Model B: No clustering, single global PCA (with) + LS model, 80/20 Split")
-print("================================")
+print("\n=================================================================")
+print("Model B: No clustering, single global PCA (without) + LS model, 80/20")
+print("=================================================================")
+
 
 
 theta_global = LS(X_train, y_train)
@@ -883,17 +905,16 @@ for cluster in range(c_value):
     y_mean_per_cluster[cluster] = np.mean(y_train[cluster_indices])
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
-print(f"RMSE_mean: {RMSE_mean:.4f}")
+RMSE_mean = RMSE_mean_calculation(y_train_hat_global, y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 y_test_hat_global = predict_LS(X_test, theta_global)
 rmse_global_test = np.sqrt(np.mean((y_test_hat_global - y_test)**2))
 print("Global Model with LS - Test RMSE:", rmse_global_test)
 
-y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_train_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
-print(f"RMSE_mean: {RMSE_mean:.4f}")
-
+y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
+RMSE_mean = RMSE_mean_calculation(y_test_hat_global,y_mean_for_samples)
+print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 #%% ================================================================
 # Model C – GK on all p dimensions
@@ -1045,6 +1066,6 @@ print("================================")
 print("Root Mean Square Error:", np.sqrt(np.mean((y_test_hat - y_test)**2)))
 
 y_mean_for_samples = np.array([y_mean_per_cluster[label] for label in X_test_labels])
-RMSE_mean = RMSE_mean_calculation(y_hat,y_mean_for_samples)
+RMSE_mean = RMSE_mean_calculation(y_test_hat,y_mean_for_samples)
 print(f"RMSE_mean: {RMSE_mean:.4f}")
 
