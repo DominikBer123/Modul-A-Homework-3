@@ -498,6 +498,7 @@ print(f"Global RMSE_mean: {RMSE_mean:.4f}")
 
 print_rmse_mean_per_class(y_test_hat_global, y_test_norm, X_test_labels, c_value)
 
+#%%
 print("\n=================================================================")
 print("Model B: No clustering, single global PCA (without) + LS model, Normal Split")
 print("=================================================================")
